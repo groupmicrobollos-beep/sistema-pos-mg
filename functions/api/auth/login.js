@@ -1,115 +1,103 @@
-import { 
-    getCorsHeaders, 
-    hashPassword, 
-    getCookieConfig,
-    generateCookieHeader,
-    publicUser,
-    verifyPassword,
-    createSession
+// functions/api/auth/login.js
+import {
+  json,
+  getCorsHeaders,
+  getCookieConfig,
+  generateCookieHeader,
+  hashPassword,
+  publicUser,
+  createSession,
+  ensureSchema,
 } from '../utils.js';
 
-function permsFor(role) {
-    if (role === "admin") return { all: true, inventory: true, quotes: true, settings: true, reports: true, pos: true };
-    if (role === "seller") return { pos: true, quotes: true, inventory: true };
-    return {};
+function userSelect(byEmail) {
+  const where = byEmail ? "lower(email)=lower(?)" : "lower(username)=lower(?)";
+  return `
+    SELECT id, email, username, role, branch_id, full_name, salt, password_hash, COALESCE(active,1) AS active
+    FROM users
+    WHERE ${where}
+    LIMIT 1
+  `;
 }
 
-// ====== Request Handlers ======
-export const onRequestOptions = async ({ request }) => {
-    return new Response(null, {
-        headers: getCorsHeaders(request)
-    });
-};
+export const onRequest = async ({ request, env }) => {
+  const cors = getCorsHeaders(request);
+  const method = request.method.toUpperCase();
 
-export const onRequestPost = async ({ request, env }) => {
-    // Asegurar que los headers CORS estén presentes
-    const corsHeaders = {
-        "Access-Control-Allow-Origin": request.headers.get("Origin") || "*",
-        "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept",
-        "Access-Control-Allow-Credentials": "true",
-        "Vary": "Origin",
-    };
+  // CORS preflight
+  if (method === 'OPTIONS') return new Response(null, { headers: cors });
 
+  // Solo aceptamos POST
+  if (method !== 'POST') return json({ error: 'Method Not Allowed' }, 405, cors);
+
+  try {
+    // 1) Body
     let body;
-    try {
-        body = await request.json();
-    } catch (err) {
-        return new Response(
-            JSON.stringify({ error: "Invalid JSON body" }), 
-            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-    }
+    try { body = await request.json(); }
+    catch { return json({ error: "Invalid JSON body" }, 400, cors); }
 
-    const { identifier, password } = body;
-    const ident = (identifier || "").trim();
-    const pass = (password || "").trim();
-
+    const ident = String(body?.identifier || "").trim();
+    const pass  = String(body?.password   || "").trim();
     if (!ident || !pass) {
-        return json({ error: "Username/email and password are required" }, 400, corsHeaders);
+      return json({ error: "Username/email and password are required" }, 400, cors);
     }
 
+    // 2) Buscar usuario
     const byEmail = ident.includes("@");
-    const query = byEmail
-        ? `SELECT id, email, username, role, branch_id, full_name, salt, password_hash, active FROM users WHERE lower(email)=lower(?) AND COALESCE(active,1)=1 LIMIT 1`
-        : `SELECT id, email, username, role, branch_id, full_name, salt, password_hash, active FROM users WHERE lower(username)=lower(?) AND COALESCE(active,1)=1 LIMIT 1`;
-
     let user;
     try {
-        const { results } = await env.DB.prepare(query).bind(ident).all();
-        user = results?.[0];
+      const { results } = await env.DB.prepare(userSelect(byEmail)).bind(ident).all();
+      user = results?.[0];
     } catch (err) {
-        console.error("[login] DB user query error:", err);
-        return json({ error: "Internal server error while fetching user" }, 500, corsHeaders);
+      console.error("[login] DB user query error:", err);
+      return json({ error: "Internal server error while fetching user" }, 500, cors);
     }
 
-    if (!user || !user.salt || !user.password_hash) {
-        return json({ error: "Invalid credentials" }, 401, corsHeaders);
+    if (!user || !user.salt || !user.password_hash || user.active !== 1) {
+      return json({ error: "Invalid credentials" }, 401, cors);
     }
 
+    // 3) Verificar contraseña
     try {
-        const hashed = await hashPassword(pass, user.salt);
-        if (hashed !== user.password_hash) {
-            return json({ error: "Invalid credentials" }, 401, corsHeaders);
-        }
+      const hashed = await hashPassword(pass, user.salt);
+      if (hashed !== user.password_hash) {
+        return json({ error: "Invalid credentials" }, 401, cors);
+      }
     } catch (err) {
-        console.error("[login] Hashing error:", err);
-        return json({ error: "Internal server error during authentication" }, 500, corsHeaders);
+      console.error("[login] Hashing error:", err);
+      return json({ error: "Internal server error during authentication" }, 500, cors);
     }
 
-    const sid = crypto.randomUUID();
-    const TTL_MIN = 60 * 24 * 30; // 30 días
-    const expiresAt = new Date(Date.now() + TTL_MIN * 60 * 1000).toISOString();
-    
-    await ensureSessionsSchema(env);
+    // 4) Asegurar sessions y crear SID
+    await ensureSchema(env, "sessions", `
+      CREATE TABLE IF NOT EXISTS sessions (
+        id TEXT PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        expires_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+      CREATE INDEX IF NOT EXISTS idx_sessions_exp  ON sessions(expires_at);
+    `);
+
+    const ttlSec = Number(env?.SESSION_TTL_SECONDS || 60*60*24*30); // 30 días por defecto
+    let sid;
     try {
-        await env.DB.prepare("INSERT INTO sessions (id, user_id, expires_at) VALUES (?,?,?)").bind(sid, user.id, expiresAt).run();
+      sid = await createSession(env.DB, user.id, ttlSec);
     } catch (err) {
-        console.error("[login] DB session insert error:", err);
-        return json({ error: "Internal server error while creating session" }, 500, corsHeaders);
+      console.error("[login] DB session insert error:", err);
+      return json({ error: "Internal server error while creating session" }, 500, cors);
     }
 
-    const userOut = {
-        id: user.id,
-        email: user.email,
-        username: user.username,
-        role: user.role,
-        branch_id: user.branch_id,
-        full_name: user.full_name,
-        perms: permsFor(user.role),
-    };
+    // 5) Cookie
+    const cookieCfg = getCookieConfig(request);
+    const cookie = generateCookieHeader(sid, cookieCfg, ttlSec);
 
-    // Obtener el dominio de la request para la cookie
-    const domain = new URL(request.url).hostname;
-    // Si es localhost o IP, no establecer el dominio
-    const cookieDomain = domain.includes("localhost") || /^(\d{1,3}\.){3}\d{1,3}$/.test(domain) 
-        ? "" 
-        : `; Domain=${domain}`;
+    // 6) Respuesta
+    const headers = { ...cors, "Set-Cookie": cookie };
+    return json(publicUser(user), 200, headers);
 
-    const responseHeaders = {
-        ...corsHeaders,
-        "Set-Cookie": `sid=${sid}; HttpOnly; Secure; SameSite=Lax; Path=/${cookieDomain}; Max-Age=${TTL_MIN * 60}`,
-    };
-
-    return json(userOut, 200, responseHeaders);
+  } catch (err) {
+    console.error("[login] Unhandled error:", err?.stack || err);
+    return json({ error: "Internal error" }, 500, cors);
+  }
 };
