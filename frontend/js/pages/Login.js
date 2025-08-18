@@ -27,25 +27,45 @@ function sanitizeUser(u){ const { passHash, ...rest } = u || {}; return rest; }
 
 // ===== API helper (D1 via Functions) =====
 async function apiLogin(identifier, password) {
-  // normalizar: si es email, usar lowercase
-  const ident = (identifier.includes("@") ? identifier.toLowerCase() : identifier);
+  try {
+    // normalizar: si es email, usar lowercase
+    const ident = (identifier.includes("@") ? identifier.toLowerCase() : identifier);
+    console.log("[login] Intentando login para:", ident);
 
-  const res = await fetch("/api/auth/login", {
-    method: "POST",
-    headers: { 
-      "Content-Type": "application/json",
-      "Accept": "application/json"
-    },
-    credentials: "include",
-    body: JSON.stringify({ identifier: ident, password })
-  });
-  const isJSON = res.headers.get("content-type")?.includes("application/json");
-  const data = isJSON ? await res.json() : await res.text();
-  if (!res.ok) {
-    const msg = (data && data.error) || data || `HTTP ${res.status}`;
-    throw new Error(msg);
+    const res = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { 
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+      },
+      credentials: "include",
+      body: JSON.stringify({ identifier: ident, password })
+    });
+
+    console.log("[login] Status:", res.status, "Headers:", Object.fromEntries(res.headers.entries()));
+
+    const contentType = res.headers.get("content-type");
+    const isJSON = contentType?.includes("application/json");
+    console.log("[login] Content-Type:", contentType, "isJSON:", isJSON);
+
+    const data = isJSON ? await res.json() : await res.text();
+    console.log("[login] Response data:", typeof data, isJSON ? "JSON" : "text", res.ok ? "OK" : "Error");
+
+    if (!res.ok) {
+      const msg = (data && data.error) || data || `HTTP ${res.status}`;
+      throw new Error(msg);
+    }
+
+    if (!data || typeof data !== "object") {
+      console.error("[login] Respuesta inválida:", data);
+      throw new Error("Respuesta del servidor inválida");
+    }
+
+    return data; // { id, email, username, role, branch_id, full_name, perms }
+  } catch (err) {
+    console.error("[login] Error completo:", err);
+    throw err;
   }
-  return data; // { id, email, username, role, branch_id, full_name, perms }
 }
 
 export default {
@@ -136,17 +156,44 @@ export default {
       submitBtn && (submitBtn.disabled = true);
 
       try {
+        // Deshabilitar form y mostrar estado
+        form.classList.add("opacity-50", "pointer-events-none");
+        submitBtn && (submitBtn.disabled = true);
+        submitBtn && (submitBtn.textContent = "Iniciando sesión...");
+
+        console.log("[login] Iniciando proceso de login");
+
         // 1) API D1
         const me = await apiLogin(identifier, password);
+        
+        if (!me || !me.id || !me.role) {
+          console.error("[login] Respuesta inválida del servidor:", me);
+          throw new Error("Respuesta del servidor inválida");
+        }
+
+        console.log("[login] Login exitoso, guardando sesión");
         setAuth({ token: "cookie", user: me });
+        
+        // Redirección
+        console.log("[login] Redirigiendo a dashboard");
         location.hash = "#/dashboard";
         return;
+
       } catch (err) {
-        const msg = (err && err.message) ? err.message : "Error al iniciar sesión";
-        showError(msg); // p.ej., "Credenciales inválidas"
-        console.warn("[login] api error", msg);
+        console.error("[login] Error en proceso de login:", err);
+        
+        // Mostrar error específico o genérico
+        const msg = (err && err.message) 
+          ? err.message
+          : "Error al iniciar sesión. Por favor, intenta de nuevo.";
+        
+        showError(msg);
+
       } finally {
+        // Restaurar UI
+        form.classList.remove("opacity-50", "pointer-events-none");
         submitBtn && (submitBtn.disabled = false);
+        submitBtn && (submitBtn.textContent = "Entrar");
       }
 
       // 2) Fallback local
