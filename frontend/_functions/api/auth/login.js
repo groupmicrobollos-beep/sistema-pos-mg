@@ -5,7 +5,7 @@ function getCorsHeaders(request) {
     return {
         "Access-Control-Allow-Origin": request.headers.get("Origin") || "*",
         "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept",
         "Access-Control-Allow-Credentials": "true",
         "Vary": "Origin",
     };
