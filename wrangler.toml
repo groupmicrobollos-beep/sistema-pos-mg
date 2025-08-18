@@ -9,6 +9,16 @@ command = "cd frontend && npm install && npm run build"
 
 [site]
 bucket = "./frontend"
+entry-point = "./worker.js"
+
+# Configuración de Pages
+pages_build_output_dir = "frontend/dist"
+
+# Configuración de Functions
+[functions]
+directory = "functions"
+include = ["api/**/*.js"]
+exclude = ["**/*.test.js", "**/*.spec.js"]
 
 # Configuración de assets
 [assets]
