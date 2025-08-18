@@ -1,11 +1,14 @@
 # wrangler.toml
 name = "sistema-pos-mg"
 compatibility_date = "2025-08-14"
+main = "frontend/worker.js"
 
 # Configuración de Pages
 [build]
-command = ""
-upload.format = "service-worker"
+command = "npm run build"
+
+[site]
+bucket = "./frontend"
 
 # Configuración de la base de datos D1
 [[d1_databases]]
@@ -13,7 +16,13 @@ binding = "DB"
 database_name = "sistema-pos-mg"
 database_id = "a87247bd-4618-44da-9aaf-9c8874c29805"
 
-# Rutas y bindings
-[site]
-bucket = "./frontend"
-entry-point = "frontend/worker.js"
+# Variables de entorno
+[env.production]
+name = "sistema-pos-mg-prod"
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "sistema-pos-mg"
+database_id = "a87247bd-4618-44da-9aaf-9c8874c29805"
+
+[env.development]
+name = "sistema-pos-mg-dev"
