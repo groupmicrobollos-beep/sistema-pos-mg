@@ -1,0 +1,31 @@
+name = "sistema-pos-microbollos"
+main = "worker.js"
+compatibility_date = "2025-08-18"
+
+[build]
+pages_build_output_dir = "dist"
+
+[functions]
+directory = "functions"
+
+[site]
+bucket = "./dist"
+entry-point = "worker.js"
+
+[env.production]
+name = "sistema-pos-microbollos-prod"
+route = "pos.microbollos.com/*"
+workers_dev = true
+
+[env.development]
+name = "sistema-pos-microbollos-dev"
+workers_dev = true
+
+[[kv_namespaces]]
+binding = "SESSION_STORE"
+id = "86794f5e1ad14bb3b8a007ca881e6509"
+preview_id = "86794f5e1ad14bb3b8a007ca881e6509"
+
+[vars]
+ENVIRONMENT = "production"
+SESSION_DURATION = "86400"
