@@ -1,46 +1,76 @@
-// Headers de CORS
-function getCorsHeaders(request) {
-    return {
-        "Access-Control-Allow-Origin": request.headers.get("Origin") || "*",
-        "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization",
-        "Access-Control-Allow-Credentials": "true",
-        "Vary": "Origin",
-    };
-}
+// /api/auth/logout.js
+import {
+    json,
+    getCorsHeaders,
+    getCookie,
+} from '../utils.js';
 
-// Manejador de OPTIONS para CORS pre-flight
+// Preflight para CORS
 export const onRequestOptions = async ({ request }) => {
-    return new Response(null, {
-        headers: getCorsHeaders(request)
-    });
+    return new Response(null, { headers: getCorsHeaders(request) });
 };
 
-// Manejador de POST para logout
+// POST /api/auth/logout
 export const onRequestPost = async ({ request, env }) => {
-    const corsHeaders = getCorsHeaders(request);
+    const cors = getCorsHeaders(request);
 
-    // Lógica de logout
     try {
-        const sid = (request.headers.get('Cookie') || '').match(/sid=([^;]+)/)?.[1];
-        if (sid) {
-            await env.DB.prepare('DELETE FROM sessions WHERE id=?').bind(sid).run();
+        // 1) Obtener SID desde cookie
+        const sid = getCookie(request, "sid");
+
+        // 2) Borrar sesión en D1 (si existe)
+        if (sid && env?.DB) {
+            try {
+                await env.DB.prepare('DELETE FROM sessions WHERE id = ?').bind(sid).run();
+            } catch (err) {
+                console.error("[logout] DB delete error:", err);
+                // no impedimos el logout; continuamos borrando cookie
+            }
         }
-    } catch (e) {
-        console.error("Logout DB error:", e);
-        // No bloqueamos al usuario si la DB falla, solo logueamos.
+
+        // 3) Armar cookie expirada con atributos consistentes
+        const url = new URL(request.url);
+        const host = url.hostname;
+        const isLocalhost = url.protocol === 'http:' || host.includes('localhost') || /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
+
+        // Nota: en localhost, Secure puede evitar que el navegador borre/guarde cookies.
+        // Si usás http://localhost, considerá correr con https en dev o quitar Secure condicionalmente.
+        const parts = [
+            'sid=',
+            'HttpOnly',
+            'Path=/',
+            'SameSite=Lax',
+            'Max-Age=0', // expira inmediatamente
+        ];
+        if (!isLocalhost) parts.push('Secure');     // en prod/https
+        if (!isLocalhost) parts.push(`Domain=${host}`);
+
+        const headers = {
+            ...cors,
+            'Set-Cookie': parts.join('; '),
+        };
+
+        return json({ ok: true }, 200, headers);
+
+    } catch (err) {
+        console.error("[logout] Unhandled error:", err?.stack || err);
+        // igual devolvemos cookie expirada para asegurar logout del lado del browser
+        const url = new URL(request.url);
+        const host = url.hostname;
+        const isLocalhost = url.protocol === 'http:' || host.includes('localhost') || /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
+        const parts = [
+            'sid=',
+            'HttpOnly',
+            'Path=/',
+            'SameSite=Lax',
+            'Max-Age=0',
+        ];
+        if (!isLocalhost) parts.push('Secure');
+        if (!isLocalhost) parts.push(`Domain=${host}`);
+
+        return json({ ok: true }, 200, { ...getCorsHeaders(request), 'Set-Cookie': parts.join('; ') });
     }
-
-    // Devolver respuesta exitosa con la cookie borrada
-    const headers = {
-        ...corsHeaders,
-        'Content-Type': 'application/json',
-        // Instrucción para que el navegador borre la cookie
-        'Set-Cookie': 'sid=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0'
-    };
-
-    return new Response(JSON.stringify({ ok: true, message: `Logout successful via ${request.method}` }), {
-        status: 200,
-        headers: headers
-    });
 };
+
+// Fallback por compatibilidad (opcional)
+export const onRequest = onRequestPost;
