@@ -99,7 +99,7 @@ export const onRequestPost = async ({ request, env }) => {
     const sid = crypto.randomUUID();
     const TTL_MIN = 60 * 24 * 30; // 30 días
     const expiresAt = new Date(Date.now() + TTL_MIN * 60 * 1000).toISOString();
-    
+
     await ensureSessionsSchema(env);
     try {
         await env.DB.prepare("INSERT INTO sessions (id, user_id, expires_at) VALUES (?,?,?)").bind(sid, user.id, expiresAt).run();
