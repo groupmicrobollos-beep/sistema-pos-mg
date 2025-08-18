@@ -1,0 +1,30 @@
+{
+  "name": "sistema-pos-microbollos",
+  "version": "1.0.0",
+  "description": "Sistema POS para Microbollos",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler pages dev .",
+    "build": "npm run build:css && npm run build:copy",
+    "build:css": "tailwindcss -i ./src/input.css -o ./dist/output.css --minify",
+    "build:copy": "mkdir -p dist && cp -r assets dist/ && cp -r js dist/ && cp index.html dist/",
+    "deploy": "wrangler pages deploy .",
+    "start": "npm run dev"
+  },
+  "keywords": ["pos", "cloudflare", "workers"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@cloudflare/kv-asset-handler": "^0.3.0",
+    "@cloudflare/workers-types": "^4.20230904.0",
+    "itty-router": "^4.0.13"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.4.21",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^3.4.1",
+    "wrangler": "^3.0.0",
+    "@cloudflare/workers-types": "^4.20230904.0",
+    "typescript": "^5.0.4"
+  }
+}
