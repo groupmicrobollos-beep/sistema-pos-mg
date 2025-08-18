@@ -1,5 +1,3 @@
-// /api/auth/login.js
-
 // ====== CORS & JSON Helpers ======
 function getCorsHeaders(request) {
     return {
@@ -51,11 +49,24 @@ export const onRequestOptions = async ({ request }) => {
 };
 
 export const onRequestPost = async ({ request, env }) => {
-    const corsHeaders = getCorsHeaders(request);
+    // Asegurar que los headers CORS estén presentes
+    const corsHeaders = {
+        "Access-Control-Allow-Origin": request.headers.get("Origin") || "*",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept",
+        "Access-Control-Allow-Credentials": "true",
+        "Vary": "Origin",
+    };
+
+    // Log de la request para debug
+    console.log("[login] Request headers:", Object.fromEntries(request.headers.entries()));
+    
     let body;
     try {
         body = await request.json();
+        console.log("[login] Request body:", { identifier: body.identifier, hasPassword: !!body.password });
     } catch (err) {
+        console.error("[login] JSON parse error:", err);
         return json({ error: "Invalid JSON body" }, 400, corsHeaders);
     }
 
@@ -81,12 +92,12 @@ export const onRequestPost = async ({ request, env }) => {
         return json({ error: "Internal server error while fetching user" }, 500, corsHeaders);
     }
 
-    if (!user || !user.password_hash) {
+    if (!user || !user.salt || !user.password_hash) {
         return json({ error: "Invalid credentials" }, 401, corsHeaders);
     }
 
     try {
-        const hashInput = pass + (user.salt || "");
+        const hashInput = pass + user.salt;
         const hashed = await sha256Hex(hashInput);
         if (hashed !== user.password_hash) {
             return json({ error: "Invalid credentials" }, 401, corsHeaders);
@@ -99,7 +110,7 @@ export const onRequestPost = async ({ request, env }) => {
     const sid = crypto.randomUUID();
     const TTL_MIN = 60 * 24 * 30; // 30 días
     const expiresAt = new Date(Date.now() + TTL_MIN * 60 * 1000).toISOString();
-
+    
     await ensureSessionsSchema(env);
     try {
         await env.DB.prepare("INSERT INTO sessions (id, user_id, expires_at) VALUES (?,?,?)").bind(sid, user.id, expiresAt).run();
