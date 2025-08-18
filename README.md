@@ -37,6 +37,22 @@ Este proyecto es un sistema de punto de venta (POS) diseñado para Microbollos, 
    - Sube la carpeta completa al entorno de producción.
    - Usa `wrangler publish` para desplegar las funciones y el frontend.
 
+## Estructura recomendada para GitHub y Cloudflare Pages
+
+- `frontend/` — Código fuente del frontend (React/Vite/Tailwind)
+- `functions/` — Endpoints API para Cloudflare Pages Functions (debe estar en la raíz)
+- `migrations/` — Scripts SQL para la base de datos
+- `wrangler.toml` — Configuración de Cloudflare
+
+## Deploy en Cloudflare Pages
+- Elige la raíz del repo como directorio de proyecto
+- Output de build: `dist`
+- La carpeta `functions/` debe estar en la raíz
+
+## Notas
+- No uses `_routes.json` ni `functions` dentro de `frontend/`
+- Sube solo la raíz del proyecto a GitHub
+
 ## Notas Adicionales
 - El sistema ha sido probado exhaustivamente y está listo para producción.
 - Si encuentras algún problema, revisa los logs generados por Wrangler en `.wrangler/logs`.
