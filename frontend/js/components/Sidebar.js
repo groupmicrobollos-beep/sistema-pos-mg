@@ -24,7 +24,7 @@ export function Sidebar() {
     // Acción de Logout
     btn.addEventListener("click", async () => {
       // intentar notificar al backend
-      try { await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }); } catch (e) { /* ignore */ }
+      try { await fetch('/api/auth/logout', { method: 'GET', credentials: 'include' }); } catch (e) { /* ignore */ }
 
       // limpiar “sesin” local
       setAuth({ token: null, user: null });
