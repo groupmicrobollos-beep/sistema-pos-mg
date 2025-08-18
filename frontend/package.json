@@ -5,7 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler pages dev .",
-    "build": "tailwindcss -i ./src/input.css -o ./dist/output.css --minify",
+    "build": "npm run build:css && npm run build:js && npm run build:copy",
+    "build:css": "tailwindcss -i ./src/input.css -o ./dist/output.css --minify",
+    "build:js": "mkdir -p dist/js && cp -r js/* dist/js/",
+    "build:copy": "mkdir -p dist && cp -r assets dist/ && cp index.html dist/",
     "deploy": "npm run build && wrangler pages deploy .",
     "start": "npm run dev"
   },
