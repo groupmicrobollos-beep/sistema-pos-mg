@@ -1,23 +1,20 @@
 // /api/auth/login.js
 
-// ====== CORS ======
-function cors(req) {
-    const o = req.headers.get("Origin");
-    // Nota: con credenciales, lo ideal es eco del Origin real.
+// ====== CORS & JSON Helpers ======
+function getCorsHeaders(request) {
     return {
-        "Access-Control-Allow-Origin": o || "*",
-        "Vary": "Origin",
+        "Access-Control-Allow-Origin": request.headers.get("Origin") || "*",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization",
         "Access-Control-Allow-Credentials": "true",
-        "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type",
+        "Vary": "Origin",
     };
 }
 
-// Respuesta JSON (si pasás request, agrega CORS)
-function json(d, s = 200, req) {
-    return new Response(JSON.stringify(d), {
-        status: s,
-        headers: { "Content-Type": "application/json", ...(req ? cors(req) : {}) },
+function json(data, status = 200, headers = {}) {
+    return new Response(JSON.stringify(data), {
+        status,
+        headers: { "Content-Type": "application/json", ...headers },
     });
 }
 
@@ -29,125 +26,90 @@ async function sha256Hex(s) {
 }
 
 function permsFor(role) {
-    if (role === "admin")
-        return { all: true, inventory: true, quotes: true, settings: true, reports: true, pos: true };
-    if (role === "seller")
-        return { pos: true, quotes: true, inventory: true };
+    if (role === "admin") return { all: true, inventory: true, quotes: true, settings: true, reports: true, pos: true };
+    if (role === "seller") return { pos: true, quotes: true, inventory: true };
     return {};
 }
 
-// ====== Schema helper (evita 500 si aún no existe sessions) ======
+// ====== Schema helper ======
 let sessionsSchemaEnsured = false;
 async function ensureSessionsSchema(env) {
     if (sessionsSchemaEnsured) return;
     try {
-        await env.DB.prepare(
-            "CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, user_id INTEGER NOT NULL, expires_at TEXT NOT NULL)"
-        ).run();
-        await env.DB.prepare(
-            "CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)"
-        ).run();
-        await env.DB.prepare(
-            "CREATE INDEX IF NOT EXISTS idx_sessions_exp ON sessions(expires_at)"
-        ).run();
+        await env.DB.prepare("CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, user_id INTEGER NOT NULL, expires_at TEXT NOT NULL)").run();
         sessionsSchemaEnsured = true;
     } catch (err) {
-        // No rompemos el flujo por error de DDL; solo dejamos log
         console.warn("[login] ensureSessionsSchema warn:", err?.message || err);
     }
 }
 
-// Validar datos del usuario
-function validateUserData(user) {
-    if (!user || !user.salt || !user.password_hash) {
-        console.warn("[login] Datos de usuario inválidos:", user);
-        return false;
+// ====== Universal Request Handler ======
+export const onRequest = async ({ request, env }) => {
+    const corsHeaders = getCorsHeaders(request);
+
+    if (request.method === "OPTIONS") {
+        return new Response(null, { headers: corsHeaders });
     }
-    return true;
-}
 
-// ====== Handlers ======
-export const onRequestOptions = async ({ request }) =>
-    new Response(null, { headers: cors(request) });
+    if (request.method !== "POST") {
+        return json({ error: "Method Not Allowed" }, 405, corsHeaders);
+    }
 
-export const onRequestPost = async ({ request, env }) => {
-    // 1) Body
+    // --- POST Logic ---
     let body;
     try {
         body = await request.json();
-        console.log("[login] Body recibido:", body);
     } catch (err) {
-        console.error("[login] Error al parsear JSON del body:", err);
-        return json({ error: "JSON inválido" }, 400, request);
+        return json({ error: "Invalid JSON body" }, 400, corsHeaders);
     }
 
-    const { identifier, email, password } = body;
-    const identRaw = (identifier ?? email ?? "").trim();
-    const ident = identRaw.includes("@") ? identRaw.toLowerCase() : identRaw;
-    const pass = (password ?? "").trim();
+    const { identifier, password } = body;
+    const ident = (identifier || "").trim();
+    const pass = (password || "").trim();
 
-    console.log("[login] Identificador procesado:", ident);
     if (!ident || !pass) {
-        console.warn("[login] Usuario/email o contraseña faltantes");
-        return json({ error: "Usuario/email y contraseña requeridos" }, 400, request);
+        return json({ error: "Username/email and password are required" }, 400, corsHeaders);
     }
 
-    // 2) Buscar usuario
     const byEmail = ident.includes("@");
     const query = byEmail
-        ? `SELECT id,email,username,role,branch_id,full_name,salt,password_hash,active
-           FROM users
-           WHERE lower(email)=lower(?) AND COALESCE(active,1)=1
-           LIMIT 1`
-        : `SELECT id,email,username,role,branch_id,full_name,salt,password_hash,active
-           FROM users
-           WHERE lower(username)=lower(?) AND COALESCE(active,1)=1
-           LIMIT 1`;
+        ? `SELECT id, email, username, role, branch_id, full_name, salt, password_hash, active FROM users WHERE lower(email)=lower(?) AND COALESCE(active,1)=1 LIMIT 1`
+        : `SELECT id, email, username, role, branch_id, full_name, salt, password_hash, active FROM users WHERE lower(username)=lower(?) AND COALESCE(active,1)=1 LIMIT 1`;
 
     let user;
     try {
         const { results } = await env.DB.prepare(query).bind(ident).all();
         user = results?.[0];
-        console.log("[login] Usuario encontrado:", user);
     } catch (err) {
-        console.error("[login] Error en la consulta SQL:", err);
-        return json({ error: "Error interno al buscar usuario" }, 500, request);
+        console.error("[login] DB user query error:", err);
+        return json({ error: "Internal server error while fetching user" }, 500, corsHeaders);
     }
 
-    if (!validateUserData(user)) {
-        console.warn("[login] Datos de usuario inválidos:", user);
-        return json({ error: "Credenciales inválidas (usuario)" }, 401, request);
+    if (!user || !user.salt || !user.password_hash) {
+        return json({ error: "Invalid credentials" }, 401, corsHeaders);
     }
 
-    // 3) Verificar contraseña
     try {
         const hashInput = pass + user.salt;
         const hashed = await sha256Hex(hashInput);
-        console.log("[login] Hash calculado:", hashed);
-        console.log("[login] Hash esperado:", user.password_hash);
         if (hashed !== user.password_hash) {
-            console.warn("[login] Hash no coincide:", { hashed, expected: user.password_hash, input: hashInput });
-            return json({ error: "Credenciales inválidas (contraseña)" }, 401, request);
+            return json({ error: "Invalid credentials" }, 401, corsHeaders);
         }
     } catch (err) {
-        console.error("[login] Error al calcular hash:", err);
-        return json({ error: "Error interno al verificar contraseña" }, 500, request);
+        console.error("[login] Hashing error:", err);
+        return json({ error: "Internal server error during authentication" }, 500, corsHeaders);
     }
 
-    // 4) Crear sesión
     const sid = crypto.randomUUID();
     const TTL_MIN = 60 * 24 * 30; // 30 días
     const expiresAt = new Date(Date.now() + TTL_MIN * 60 * 1000).toISOString();
-    console.log("[login] Creando sesión con SID:", sid);
+    
     await ensureSessionsSchema(env);
     try {
-        await env.DB.prepare(
-            "INSERT INTO sessions (id, user_id, expires_at) VALUES (?,?,?)"
-        ).bind(sid, user.id, expiresAt).run();
-        console.log("[login] Sesión creada con éxito:", { sid, userId: user.id, expiresAt });
+        await env.DB.prepare("INSERT INTO sessions (id, user_id, expires_at) VALUES (?,?,?)").bind(sid, user.id, expiresAt).run();
     } catch (err) {
-        console.error("[login] Error al insertar sesión:", err);
-        return json({ error: "Error interno al crear sesión" }, 500, request);
+        console.error("[login] DB session insert error:", err);
+        return json({ error: "Internal server error while creating session" }, 500, corsHeaders);
     }
 
     const userOut = {
@@ -159,13 +121,12 @@ export const onRequestPost = async ({ request, env }) => {
         full_name: user.full_name,
         perms: permsFor(user.role),
     };
-    console.log("[login] Respuesta final al cliente:", userOut);
-    return new Response(JSON.stringify(userOut), {
-        status: 200,
-        headers: {
-            "Content-Type": "application/json",
-            ...cors(request),
-            "Set-Cookie": `sid=${sid}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${TTL_MIN * 60}`,
-        },
-    });
+
+    const responseHeaders = {
+        ...corsHeaders,
+        "Set-Cookie": `sid=${sid}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${TTL_MIN * 60}`,
+    };
+
+    return json(userOut, 200, responseHeaders);
 };
+
