@@ -1,48 +1,43 @@
-# wrangler.toml
+# wrangler.toml — Pages
 name = "sistema-pos-mg"
 compatibility_date = "2025-08-14"
 
-[[d1_databases]]
-binding = "DB"
-database_name = "sistema-pos-mg"
-database_id = "a87247bd-4618-444a-9aaf-9c8874c29805"
-
-[[kv_namespaces]]
-binding = "KV"
-id = "b6794f5e1acf4bb3b8a007ca881e65d9"
-
-[build]
-command = "cd frontend && npm install && npm run build"
-
-[site]
-bucket = "./frontend/dist"
-
-# Configuración de la base de datos D1
+# === Bindings por defecto (preview / development locales con `wrangler pages dev`) ===
 [[d1_databases]]
 binding = "DB"
 database_name = "sistema-pos-mg-db"
 database_id = "db8889bc-2a54-4db4-8e53-a1ec4e7280ed"
 
-# Configuración del KV namespace
 [[kv_namespaces]]
 binding = "KV"
 id = "b6794f5e1acf4bb3b8a007ca881e65d9"
 
-# Variables de entorno por defecto
 [vars]
 SESSION_TTL_SECONDS = "86400"
 ENABLE_DEV_CREATE_USER = "false"
 
-# Configuración de producción
+# === Entorno de producción (Pages: "Production") ===
 [env.production]
 name = "sistema-pos-mg-prod"
+
 [[env.production.d1_databases]]
 binding = "DB"
 database_name = "sistema-pos-mg-db"
 database_id = "db8889bc-2a54-4db4-8e53-a1ec4e7280ed"
+
 [[env.production.kv_namespaces]]
 binding = "KV"
 id = "b6794f5e1acf4bb3b8a007ca881e65d9"
 
-[env.development]
-name = "sistema-pos-mg-dev"
+# === Entorno de preview (Pages: "Preview") ===
+[env.preview]
+name = "sistema-pos-mg-preview"
+
+[[env.preview.d1_databases]]
+binding = "DB"
+database_name = "sistema-pos-mg-db"
+database_id = "db8889bc-2a54-4db4-8e53-a1ec4e7280ed"
+
+[[env.preview.kv_namespaces]]
+binding = "KV"
+id = "b6794f5e1acf4bb3b8a007ca881e65d9"
