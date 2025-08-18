@@ -9,8 +9,8 @@ function loadUser() {
 
 const state = {
     auth: {
-        user: loadUser(),                          // usuario persistido
-        token: localStorage.getItem("mb_token") || null, // opcional (compat)
+        user: loadUser(),                               // usuario persistido
+        token: localStorage.getItem("mb_token") || null // opcional (compat)
     },
 };
 
@@ -77,17 +77,38 @@ export function hasAnyPerm(perms = []) {
 const API_BASE = ""; // mismo origen. Si usás un Worker aparte, poné su URL.
 
 async function request(path, { method = "GET", body, headers } = {}) {
-    const res = await fetch(`${API_BASE}${path}`, {
-        method,
-        headers: { "Content-Type": "application/json", ...(headers || {}) },
-        body: body ? JSON.stringify(body) : undefined,
-        credentials: "include",                // importante si usás login por cookie
-    });
-    const isJSON = res.headers.get("content-type")?.includes("application/json");
-    const data = isJSON ? await res.json() : await res.text();
+    let res;
+    try {
+        res = await fetch(`${API_BASE}${path}`, {
+            method,
+            headers: { "Content-Type": "application/json", ...(headers || {}) },
+            body: body ? JSON.stringify(body) : undefined,
+            credentials: "include", // necesario si la sesión es por cookie httpOnly
+        });
+    } catch (netErr) {
+        throw new Error(`[network] ${netErr?.message || netErr}`);
+    }
+
+    // 204 No Content o sin cuerpo
+    if (res.status === 204) return null;
+
+    const ct = (res.headers.get("content-type") || "").toLowerCase();
+    let data;
+    if (ct.includes("application/json")) {
+        try { data = await res.json(); }
+        catch { data = { error: "invalid_json_response" }; }
+    } else {
+        const text = await res.text();
+        // Limitar HTML gigante de Cloudflare para no romper logs/UI
+        data = text?.length > 600 ? text.slice(0, 600) + "…[truncated]" : text;
+    }
+
     if (!res.ok) {
-        const msg = (data && data.error) || data || `HTTP ${res.status}`;
-        throw new Error(msg);
+        const msg =
+            (data && data.error) ||
+            (typeof data === "string" ? data : data?.message) ||
+            `HTTP ${res.status}`;
+        throw new Error(`[${res.status}] ${msg}`);
     }
     return data;
 }
@@ -102,8 +123,8 @@ export const auth = {
             setAuth({ token: state.auth.token || "cookie", user: me });
             return me;
         } catch (err) {
-            // Error de sesión - limpiamos localStorage
-            console.warn("[auth.init] Error:", err?.message || "Sin sesión");
+            // Error de sesión - limpiamos localStorage (no es fatal antes del login)
+            console.info("[auth.init] Sin sesión:", err?.message || "No session cookie");
             setAuth({ token: null, user: null });
             return null;
         }
@@ -111,8 +132,10 @@ export const auth = {
 
     /** Login -> /api/auth/login (devuelve usuario y setea cookie httpOnly) */
     async login(email, password) {
-        const me = await request("/api/auth/login", { method: "POST", body: { email, password } });
-        setAuth({ token: "cookie", user: me });
+        const resp = await request("/api/auth/login", { method: "POST", body: { email, password } });
+        // Acepta { user } o el usuario plano
+        const me = resp?.user ?? resp;
+        setAuth({ token: "cookie", user: me || null });
         return me;
     },
 
@@ -146,4 +169,17 @@ export const quotes = {
 };
 
 // Export por default (cómodo para importar como `store`)
-export default { products, branches, quotes, auth, getState, subscribe, setAuth, logout, isAuthenticated, currentUser, hasPerm, hasAnyPerm };
+export default {
+    products,
+    branches,
+    quotes,
+    auth,
+    getState,
+    subscribe,
+    setAuth,
+    logout,
+    isAuthenticated,
+    currentUser,
+    hasPerm,
+    hasAnyPerm
+};
