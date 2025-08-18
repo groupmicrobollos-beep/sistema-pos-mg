@@ -1,46 +1,83 @@
-// Headers de CORS
-function getCorsHeaders(request) {
-    return {
-        "Access-Control-Allow-Origin": request.headers.get("Origin") || "*",
-        "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization",
-        "Access-Control-Allow-Credentials": "true",
-        "Vary": "Origin",
-    };
-}
+// functions/api/auth/logout.js
 
-// Manejador de OPTIONS para CORS pre-flight
+import { deleteSession } from "../../lib/auth";
+
 export const onRequestOptions = async ({ request }) => {
-    return new Response(null, {
-        headers: getCorsHeaders(request)
-    });
+  const origin = request.headers.get("Origin") || "*";
+  return new Response(null, {
+    status: 204,
+    headers: {
+      "Access-Control-Allow-Origin": origin,
+      "Access-Control-Allow-Methods": "POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept",
+      "Access-Control-Allow-Credentials": "true",
+      "Vary": "Origin"
+    }
+  });
 };
 
-// Manejador de POST para logout
 export const onRequestPost = async ({ request, env }) => {
-    const corsHeaders = getCorsHeaders(request);
+  try {
+    const origin = request.headers.get("Origin") || "";
+    const url = new URL(request.url);
+    const { protocol, hostname } = url;
 
-    // Lógica de logout
-    try {
-        const sid = (request.headers.get('Cookie') || '').match(/sid=([^;]+)/)?.[1];
-        if (sid) {
-            await env.DB.prepare('DELETE FROM sessions WHERE id=?').bind(sid).run();
-        }
-    } catch (e) {
-        console.error("Logout DB error:", e);
-        // No bloqueamos al usuario si la DB falla, solo logueamos.
+    const isLocalHttp =
+      protocol === "http:" ||
+      hostname === "localhost" ||
+      /^[0-9.]+$/.test(hostname);
+
+    const isCrossSite = (() => {
+      try {
+        if (!origin) return false;
+        return new URL(origin).hostname !== hostname;
+      } catch {
+        return false;
+      }
+    })();
+
+    // borrar sesión en DB si corresponde
+    const cookieHeader = request.headers.get("Cookie") || "";
+    const sidMatch = cookieHeader.match(/sid=([^;]+)/);
+    if (sidMatch) {
+      await deleteSession(env.DB, sidMatch[1]);
     }
 
-    // Devolver respuesta exitosa con la cookie borrada
+    // armar cookie expirada con mismos flags que login
+    const parts = [
+      "sid=",
+      "HttpOnly",
+      `SameSite=${isCrossSite ? "None" : "Lax"}`,
+      "Path=/",
+      "Max-Age=0"
+    ];
+    if (!isLocalHttp) parts.push("Secure");
+    if (
+      !hostname.includes("localhost") &&
+      !/^\d{1,3}(\.\d{1,3}){3}$/.test(hostname)
+    ) {
+      parts.push(`Domain=${hostname}`);
+    }
+    const expired = parts.join("; ");
+
     const headers = {
-        ...corsHeaders,
-        'Content-Type': 'application/json',
-        // Instrucción para que el navegador borre la cookie
-        'Set-Cookie': 'sid=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0'
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": origin || "*",
+      "Access-Control-Allow-Methods": "POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept",
+      "Access-Control-Allow-Credentials": "true",
+      "Vary": "Origin",
+      "Set-Cookie": expired
     };
 
-    return new Response(JSON.stringify({ ok: true, message: `Logout successful via ${request.method}` }), {
-        status: 200,
-        headers: headers
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers
     });
+  } catch (e) {
+    return new Response(JSON.stringify({ message: "Logout error" }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" }
+    });
+  }
 };
