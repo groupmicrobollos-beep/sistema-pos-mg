@@ -947,34 +947,6 @@ export default {
       window.CFG?.setUsers(users);
       window.CFG?.setBranches(branches);
       window.CFG?.setSettings(settings);
-        window.CFG?.setSettings(settings);
-
-        // Aplicar tema importado
-        Theme.apply(settings.theme);
-
-        repaintUsers(); repaintBranches(); paintBranchesSelect(filterBranch, branches, "", true); fillSettingsForm();
-        toast("Backup importado ✅","success");
-        logAudit("backup.import", { keys: keys.length });
-        renderAudit();
-      }catch{ toast("Archivo inválido","error"); }
-      importAll.value=""; };
-      r.readAsText(f);
-    });
-    btnClearAll.addEventListener("click", ()=>{
-      if (!confirm("Esto borrará TODOS los datos locales del sistema (cfg_*, inv_*, pos_*). ¿Continuar?")) return;
-      const toRemove = [];
-      for (let i=0; i<localStorage.length; i++){
-        const k = localStorage.key(i);
-        if (/^(cfg_|inv_|pos_)/.test(k)) toRemove.push(k);
-      }
-      toRemove.forEach(k=> localStorage.removeItem(k));
-      users=[]; branches=[]; settings=defaultSettings();
-      save(CFG_SETTINGS_KEY, settings);
-
-      // 🔔 avisos globales
-      window.CFG?.setUsers(users);
-      window.CFG?.setBranches(branches);
-      window.CFG?.setSettings(settings);
 
       // Tema vuelve a default (auto)
       Theme.apply(settings.theme);
@@ -1036,6 +1008,34 @@ function modalUser(){ return /*html*/`
             <div class="font-medium">🔐 Contraseña</div>
             <button id="user-pass-toggle" type="button" class="btn mini">👁️ Mostrar/Ocultar</button>
           </div>
+          <div class="grid sm:grid-cols-2 gap-3 mt-2">
+            <label class="text-sm block field"><span>Nueva contraseña</span>
+              <input name="pass" type="password" placeholder="Dejar en blanco para no cambiar"></label>
+            <label class="text-sm block field"><span>Repetir</span>
+              <input name="pass2" type="password" placeholder="Repite la clave"></label>
+          </div>
+          <div class="text-xs text-slate-400 mt-1">Tip: mínimo 4 caracteres. La contraseña se guarda hasheada en local.</div>
+        </div>
+        <div class="glass rounded-lg p-3">
+          <div class="font-medium mb-2">🧩 Permisos avanzados</div>
+          <div class="grid sm:grid-cols-3 gap-2 text-sm">
+            <label><input type="checkbox" name="perm_inventory"> Inventario</label>
+            <label><input type="checkbox" name="perm_suppliers"> Proveedores</label>
+            <label><input type="checkbox" name="perm_pos"> POS</label>
+            <label><input type="checkbox" name="perm_quotes"> Presupuestos</label>
+            <label><input type="checkbox" name="perm_reports"> Reportes</label>
+            <label><input type="checkbox" name="perm_settings"> Configuración</label>
+            <label><input type="checkbox" name="perm_users"> Usuarios</label>
+            <label><input type="checkbox" name="perm_readonly"> Sólo lectura</label>
+          </div>
+          <div class="text-xs text-slate-400 mt-1">Si activás casi todo, el sistema lo tratará como “Acceso total”.</div>
+        </div>
+        <div class="flex justify-end gap-2">
+          <button type="button" class="btn" id="user-cancel">Cancelar</button>
+          <button type="button" class="btn" id="user-save-new">💾➕ Guardar y nuevo</button>
+          <button type="button" class="btn btn-primary" id="user-save">💾 Guardar</button>
+        </div>
+      </form>
     </div>
   </div>
 `; }
@@ -1088,3 +1088,33 @@ function modalBranch(){ return /*html*/`
     </div>
   </div>
 `; }
+
+async function logoutUser() {
+    try {
+        const res = await fetch('/api/auth/logout', {
+            method: 'POST',
+            credentials: 'include',
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        console.log('Logout exitoso');
+    } catch (err) {
+        console.error('Error en logout:', err);
+    }
+}
+
+async function loginUser(identifier, password) {
+    try {
+        const res = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ identifier, password }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const user = await res.json();
+        console.log('Login exitoso:', user);
+        return user;
+    } catch (err) {
+        console.error('Error en login:', err);
+    }
+}
