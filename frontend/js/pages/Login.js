@@ -25,14 +25,30 @@ function matchUserIdentifier(user, ident) {
 }
 function sanitizeUser(u){ const { passHash, ...rest } = u || {}; return rest; }
 
+// ===== Utils =====
+function limitText(s, n=600) {
+  if (typeof s !== "string") return s;
+  return s.length > n ? s.slice(0, n) + "…[truncated]" : s;
+}
+
+async function fetchWithTimeout(resource, options = {}, timeoutMs = 15000) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(resource, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(id);
+  }
+}
+
 // ===== API helper (D1 via Functions) =====
 async function apiLogin(identifier, password) {
   try {
     // normalizar: si es email, usar lowercase
-    const ident = (identifier.includes("@") ? identifier.toLowerCase() : identifier);
+    const ident = (identifier.includes("@") ? identifier.toLowerCase() : identifier).trim();
     console.log("[login] Intentando login para:", ident);
 
-    const res = await fetch("/api/auth/login", {
+    const res = await fetchWithTimeout("/api/auth/login", {
       method: "POST",
       headers: { 
         "Content-Type": "application/json",
@@ -40,30 +56,59 @@ async function apiLogin(identifier, password) {
       },
       credentials: "include",
       body: JSON.stringify({ identifier: ident, password })
-    });
+    }, 15000);
 
     console.log("[login] Status:", res.status, "Headers:", Object.fromEntries(res.headers.entries()));
 
-    const contentType = res.headers.get("content-type");
-    const isJSON = contentType?.includes("application/json");
+    const contentType = res.headers.get("content-type") || "";
+    const isJSON = contentType.toLowerCase().includes("application/json");
     console.log("[login] Content-Type:", contentType, "isJSON:", isJSON);
 
-    const data = isJSON ? await res.json() : await res.text();
-    console.log("[login] Response data:", typeof data, isJSON ? "JSON" : "text", res.ok ? "OK" : "Error");
+    let payload;
+    if (isJSON) {
+      try {
+        payload = await res.json();
+      } catch {
+        payload = { error: "invalid_json_response" };
+      }
+    } else {
+      const text = await res.text();
+      payload = limitText(text);
+    }
 
     if (!res.ok) {
-      const msg = (data && data.error) || data || `HTTP ${res.status}`;
+      // Mensajes más claros por status
+      if (res.status === 401) {
+        const serverMsg = typeof payload === "object" ? (payload?.error || payload?.message) : payload;
+        throw new Error(serverMsg || "Credenciales inválidas");
+      }
+      if (res.status === 429) throw new Error("Demasiados intentos. Probá de nuevo en un momento.");
+      if (res.status >= 500) {
+        // Cloudflare 1101 suele devolver HTML; dejamos pista útil
+        const trace = typeof payload === "string" ? payload : (payload?.error || payload?.message || "");
+        throw new Error(`Error del servidor (${res.status}). ${limitText(trace, 200)}`);
+      }
+      const msg = (typeof payload === "object" ? (payload?.error || payload?.message) : payload) || `HTTP ${res.status}`;
       throw new Error(msg);
     }
 
+    // Normalizar formato de respuesta: { user } o user plano
+    const data = isJSON ? payload : null;
     if (!data || typeof data !== "object") {
-      console.error("[login] Respuesta inválida:", data);
+      console.error("[login] Respuesta inválida (no JSON o vacía):", payload);
       throw new Error("Respuesta del servidor inválida");
     }
 
-    return data; // { id, email, username, role, branch_id, full_name, perms }
+    const me = data.user ?? data; // soporta ambos formatos
+    return me; // { id, email, username, role, branch_id, full_name, perms }
   } catch (err) {
+    if (err?.name === "AbortError") {
+      console.error("[login] Timeout de login");
+      throw new Error("Tiempo de espera agotado intentando conectar con el servidor.");
+    }
     console.error("[login] Error completo:", err);
+    // Mensaje de red genérico si no hay message
+    if (!err?.message) throw new Error("Error de red al intentar iniciar sesión.");
     throw err;
   }
 }
@@ -196,7 +241,7 @@ export default {
         submitBtn && (submitBtn.textContent = "Entrar");
       }
 
-      // 2) Fallback local
+      // 2) Fallback local (solo si la API falló)
       const users = loadUsers();
       if (!Array.isArray(users) || users.length === 0) {
         showError("No hay usuarios configurados. Creá uno en Configuración → Usuarios.");
