@@ -32,7 +32,10 @@ async function apiLogin(identifier, password) {
 
   const res = await fetch("/api/auth/login", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { 
+      "Content-Type": "application/json",
+      "Accept": "application/json"
+    },
     credentials: "include",
     body: JSON.stringify({ identifier: ident, password })
   });
