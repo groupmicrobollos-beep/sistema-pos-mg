@@ -156,44 +156,17 @@ export default {
       submitBtn && (submitBtn.disabled = true);
 
       try {
-        // Deshabilitar form y mostrar estado
-        form.classList.add("opacity-50", "pointer-events-none");
-        submitBtn && (submitBtn.disabled = true);
-        submitBtn && (submitBtn.textContent = "Iniciando sesión...");
-
-        console.log("[login] Iniciando proceso de login");
-
         // 1) API D1
         const me = await apiLogin(identifier, password);
-        
-        if (!me || !me.id || !me.role) {
-          console.error("[login] Respuesta inválida del servidor:", me);
-          throw new Error("Respuesta del servidor inválida");
-        }
-
-        console.log("[login] Login exitoso, guardando sesión");
         setAuth({ token: "cookie", user: me });
-        
-        // Redirección
-        console.log("[login] Redirigiendo a dashboard");
         location.hash = "#/dashboard";
         return;
-
       } catch (err) {
-        console.error("[login] Error en proceso de login:", err);
-        
-        // Mostrar error específico o genérico
-        const msg = (err && err.message) 
-          ? err.message
-          : "Error al iniciar sesión. Por favor, intenta de nuevo.";
-        
-        showError(msg);
-
+        const msg = (err && err.message) ? err.message : "Error al iniciar sesión";
+        showError(msg); // p.ej., "Credenciales inválidas"
+        console.warn("[login] api error", msg);
       } finally {
-        // Restaurar UI
-        form.classList.remove("opacity-50", "pointer-events-none");
         submitBtn && (submitBtn.disabled = false);
-        submitBtn && (submitBtn.textContent = "Entrar");
       }
 
       // 2) Fallback local
