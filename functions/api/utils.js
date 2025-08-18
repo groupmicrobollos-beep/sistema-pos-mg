@@ -116,4 +116,4 @@ export async function ensureSchema(env, table, schema) {
             return false;
         }
     }
-    console.warn(`[Schema] Error ensuring ${table}: ${err}`);
+
