@@ -16,4 +16,4 @@ database_id = "a87247bd-4618-44da-9aaf-9c8874c29805"
 # Rutas y bindings
 [site]
 bucket = "./frontend"
-entry-point = "frontend/_worker.js"
+entry-point = "frontend/worker.js"
