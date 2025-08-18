@@ -2,6 +2,27 @@
 import { router } from "./router.js";
 import store from "./store.js";
 
+// Guard de arranque: exige login
+import { auth, isAuthenticated } from '/js/store.js';
+
+// se autoejecuta sin depender del router
+(async () => {
+  try {
+    await auth.init(); // intenta rehidratar cookie via /api/auth/me
+  } catch (_) {}
+
+  if (!isAuthenticated()) {
+    if (!location.hash.startsWith('#/login')) {
+      location.hash = '#/login';
+    }
+  } else {
+    // Si ya hay sesión y estás en login o sin hash, manda a dashboard
+    if (location.hash === '' || location.hash === '#/' || location.hash.startsWith('#/login')) {
+      location.hash = '#/dashboard';
+    }
+  }
+})();
+
 // ===== Mobile menu (silencioso, sin alerts) =====
 function setupMobileMenu() {
     const menuBtn =
@@ -107,3 +128,4 @@ window.addEventListener("hashchange", () => {
     }
     setTimeout(setupMobileMenu, 0); // re-bind tras re-render
 });
+
