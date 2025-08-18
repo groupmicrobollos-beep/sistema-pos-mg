@@ -1,96 +1,79 @@
-// /api/auth/me.js
+// functions/api/auth/me.js
 
-function cors(req) {
-    const origin = req.headers.get("Origin");
-    if (!origin) return {
-        "Access-Control-Allow-Origin": "*",
-    };
-    return {
-        "Access-Control-Allow-Origin": origin,
-        "Access-Control-Allow-Credentials": "true",
-        "Access-Control-Allow-Methods": "GET,OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type",
-        "Vary": "Origin",
-    };
-}
+// ⚠️ Ajustá estos imports a tus helpers reales en ../../lib/auth
+// Necesitamos: obtener sesión por SID, traer usuario por ID y "sanitizar" el user para el front.
+import { getSession, getUserById, publicUser } from "../../lib/auth";
 
-function json(d, s = 200, req) {
-    const headers = {
-        "Content-Type": "application/json",
-        ...(req ? cors(req) : {})
-    };
-    return new Response(JSON.stringify(d), { status: s, headers });
-}
-
-function permsFor(role) {
-    if (role === "admin")
-        return { all: true, inventory: true, quotes: true, settings: true, reports: true, pos: true };
-    if (role === "seller")
-        return { pos: true, quotes: true, inventory: true };
-    return {};
-}
-
-function getCookie(req, name) {
-    try {
-        const cookieHeader = req.headers.get("Cookie");
-        if (!cookieHeader) return null;
-        const cookies = cookieHeader.split(';').reduce((acc, cookie) => {
-            const [key, value] = cookie.trim().split('=');
-            acc[key] = decodeURIComponent(value);
-            return acc;
-        }, {});
-        return cookies[name] || null;
-    } catch (err) {
-        console.error("[getCookie] error parsing cookie:", err);
-        return null;
+export const onRequestOptions = async ({ request }) => {
+  const origin = request.headers.get("Origin") || "*";
+  return new Response(null, {
+    status: 204,
+    headers: {
+      "Access-Control-Allow-Origin": origin,
+      "Access-Control-Allow-Methods": "GET, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept",
+      "Access-Control-Allow-Credentials": "true",
+      "Vary": "Origin"
     }
-}
+  });
+};
 
-export const onRequest = async ({ request, env }) => {
-    try {
-        // Log headers para debug
-        console.log("[me] Headers:", 
-            "Cookie:", request.headers.get("Cookie"),
-            "Origin:", request.headers.get("Origin")
-        );
+export const onRequestGet = async ({ request, env }) => {
+  try {
+    const origin = request.headers.get("Origin") || "";
 
-        const sid = getCookie(request, "sid");
-        if (!sid) {
-            console.warn("[me] No cookie sid encontrada");
-            return json({ error: "No session cookie" }, 401, request);
-        }
+    // === CORS base para la respuesta (se completa más abajo)
+    const baseHeaders = {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": origin || "*",
+      "Access-Control-Allow-Methods": "GET, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept",
+      "Access-Control-Allow-Credentials": "true",
+      "Vary": "Origin"
+    };
 
-        const sql = `
-        SELECT u.id, u.email, u.username, u.role, u.branch_id, u.full_name
-        FROM sessions s
-        JOIN users u ON u.id = s.user_id
-        WHERE s.id = ?
-          AND CAST(strftime('%s', s.expires_at) AS INTEGER) > CAST(strftime('%s','now') AS INTEGER)
-          AND COALESCE(u.active,1) = 1
-        LIMIT 1
-        `;
-        
-        let row;
-        try {
-            const { results } = await env.DB.prepare(sql).bind(sid).all();
-            row = results?.[0];
-            
-            if (!row) {
-                console.warn("[me] Sesión no encontrada o expirada para sid:", sid);
-                return json({ error: "No session" }, 401, request);
-            }
+    // 1) Leer cookie "sid"
+    const cookieHeader = request.headers.get("Cookie") || "";
+    const sidMatch = cookieHeader.match(/(?:^|;\s*)sid=([^;]+)/);
 
-            const userOut = {
-                ...row,
-                perms: permsFor(row.role),
-            };
-            return json(userOut, 200, request);
-        } catch (err) {
-            console.error("[me] Error DB:", err?.message || err);
-            return json({ error: "Error interno" }, 500, request);
-        }
-    } catch (err) {
-        console.error("[me] Error general:", err?.message || err);
-        return json({ error: "Error interno" }, 500, request);
+    if (!sidMatch) {
+      // mismo mensaje que veías en consola para mantener consistencia
+      return new Response(JSON.stringify({ message: "No session cookie" }), {
+        status: 401,
+        headers: baseHeaders
+      });
     }
+
+    const sid = sidMatch[1];
+
+    // 2) Buscar sesión en DB
+    // getSession debe validar expiración/estado y devolver { userId, ... } o null
+    const session = await getSession(env.DB, sid);
+    if (!session || !session.userId) {
+      return new Response(JSON.stringify({ message: "Invalid session" }), {
+        status: 401,
+        headers: baseHeaders
+      });
+    }
+
+    // 3) Traer usuario
+    const user = await getUserById(env.DB, session.userId);
+    if (!user) {
+      return new Response(JSON.stringify({ message: "User not found" }), {
+        status: 404,
+        headers: baseHeaders
+      });
+    }
+
+    // 4) Responder usuario "público" (sin campos sensibles)
+    return new Response(
+      JSON.stringify({ ok: true, user: publicUser(user) }),
+      { status: 200, headers: baseHeaders }
+    );
+  } catch (err) {
+    return new Response(JSON.stringify({ message: "Me error" }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" }
+    });
+  }
 };
