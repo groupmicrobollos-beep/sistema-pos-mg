@@ -1,9 +1,9 @@
 # wrangler.toml
-name = "sistema-mg"
+name = "sistema-pos-mg"
 compatibility_date = "2025-08-14"
 pages_build_output_dir = "frontend"
 
 [[d1_databases]]
 binding = "DB"
 database_name = "pos_db"
-database_id = "dab8238f-1560-4084-a9e4-9bf93ca620ed"
+database_id = "a87247bd-4618-44da-9aaf-9c8874c29805"
