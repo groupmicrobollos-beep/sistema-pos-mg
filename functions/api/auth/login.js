@@ -20,14 +20,15 @@ function userSelect(byEmail) {
   `;
 }
 
+// ÚNICO export: onRequest (maneja OPTIONS y POST). Evita 405 raros.
 export const onRequest = async ({ request, env }) => {
   const cors = getCorsHeaders(request);
   const method = request.method.toUpperCase();
 
-  // CORS preflight
+  // Preflight CORS
   if (method === 'OPTIONS') return new Response(null, { headers: cors });
 
-  // Solo aceptamos POST
+  // Solo POST
   if (method !== 'POST') return json({ error: 'Method Not Allowed' }, 405, cors);
 
   try {
@@ -38,11 +39,9 @@ export const onRequest = async ({ request, env }) => {
 
     const ident = String(body?.identifier || "").trim();
     const pass  = String(body?.password   || "").trim();
-    if (!ident || !pass) {
-      return json({ error: "Username/email and password are required" }, 400, cors);
-    }
+    if (!ident || !pass) return json({ error: "Username/email and password are required" }, 400, cors);
 
-    // 2) Buscar usuario
+    // 2) Usuario
     const byEmail = ident.includes("@");
     let user;
     try {
@@ -52,23 +51,20 @@ export const onRequest = async ({ request, env }) => {
       console.error("[login] DB user query error:", err);
       return json({ error: "Internal server error while fetching user" }, 500, cors);
     }
-
     if (!user || !user.salt || !user.password_hash || user.active !== 1) {
       return json({ error: "Invalid credentials" }, 401, cors);
     }
 
-    // 3) Verificar contraseña
+    // 3) Verificar pass
     try {
       const hashed = await hashPassword(pass, user.salt);
-      if (hashed !== user.password_hash) {
-        return json({ error: "Invalid credentials" }, 401, cors);
-      }
+      if (hashed !== user.password_hash) return json({ error: "Invalid credentials" }, 401, cors);
     } catch (err) {
       console.error("[login] Hashing error:", err);
       return json({ error: "Internal server error during authentication" }, 500, cors);
     }
 
-    // 4) Asegurar sessions y crear SID
+    // 4) sessions
     await ensureSchema(env, "sessions", `
       CREATE TABLE IF NOT EXISTS sessions (
         id TEXT PRIMARY KEY,
@@ -78,8 +74,7 @@ export const onRequest = async ({ request, env }) => {
       CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
       CREATE INDEX IF NOT EXISTS idx_sessions_exp  ON sessions(expires_at);
     `);
-
-    const ttlSec = Number(env?.SESSION_TTL_SECONDS || 60*60*24*30); // 30 días por defecto
+    const ttlSec = Number(env?.SESSION_TTL_SECONDS || 60*60*24*30);
     let sid;
     try {
       sid = await createSession(env.DB, user.id, ttlSec);
@@ -92,9 +87,8 @@ export const onRequest = async ({ request, env }) => {
     const cookieCfg = getCookieConfig(request);
     const cookie = generateCookieHeader(sid, cookieCfg, ttlSec);
 
-    // 6) Respuesta
-    const headers = { ...cors, "Set-Cookie": cookie };
-    return json(publicUser(user), 200, headers);
+    // 6) OK
+    return json(publicUser(user), 200, { ...cors, "Set-Cookie": cookie });
 
   } catch (err) {
     console.error("[login] Unhandled error:", err?.stack || err);
