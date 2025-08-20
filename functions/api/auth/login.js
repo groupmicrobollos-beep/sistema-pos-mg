@@ -1,14 +1,27 @@
 // functions/api/auth/login.js
-import {
-  json,
-  getCorsHeaders,
-  getCookieConfig,
-  generateCookieHeader,
-  hashPassword,
-  publicUser,
-  createSession,
-  ensureSchema,
-} from '../utils.js';
+// Cloudflare Pages/Functions: helpers mínimos para CORS y cookies
+const ORIGIN = 'https://sistema-pos-mg.pages.dev'; // Cambia por tu frontend real si es otro
+function corsHeaders() {
+  return {
+    'Access-Control-Allow-Origin': ORIGIN,
+    'Access-Control-Allow-Credentials': 'true',
+    'Vary': 'Origin',
+    'Cache-Control': 'no-store'
+  };
+}
+function setCookieHeaders(sessionId) {
+  // Siempre Secure en Pages
+  const cookie = `sid=${sessionId}; HttpOnly; Path=/; SameSite=Lax; Secure`;
+  return { 'Set-Cookie': cookie };
+}
+function parseCookies(request) {
+  const raw = request.headers.get('Cookie') || '';
+  return raw.split(';').reduce((acc, part) => {
+    const [k, v] = part.trim().split('=');
+    if (k) acc[k] = v || '';
+    return acc;
+  }, {});
+}
 
 function userSelect(byEmail) {
   const where = byEmail ? "lower(email)=lower(?)" : "lower(username)=lower(?)";
@@ -90,26 +103,49 @@ export const onRequest = async ({ request, env }) => {
 
     // 5) Cookie y headers CORS manuales (Node.js puro compatible)
     // Detectar si HTTPS real (usar Secure solo si corresponde)
-    const url = new URL(request.url);
-    const useHttps = url.protocol === 'https:';
-    // Origin exacto del frontend
-    const frontendOrigin = request.headers.get("Origin") || url.origin;
-    const setCookie = `sid=${sid}; HttpOnly; Path=/; SameSite=Lax${useHttps ? '; Secure' : ''}`;
-
-    // Respuesta manual con headers correctos
-    return new Response(JSON.stringify({ user: publicUser(user) }), {
-      status: 200,
-      headers: {
-        'Content-Type': 'application/json',
-        'Set-Cookie': setCookie,
-        'Access-Control-Allow-Origin': frontendOrigin,
-        'Access-Control-Allow-Credentials': 'true',
-        ...cors
+      const url = new URL(request.url);
+      return new Response(null, { headers: cors });
+    } catch (err) {
+      console.error("[login] Unexpected error:", err);
+      return json({ error: "Internal server error" }, 500, cors);
+    }
+  };
+  
+  // Cloudflare Pages: POST /api/auth/login
+  export async function onRequestPost({ request, env }) {
+    const hBase = corsHeaders();
+    try {
+      const body = await request.json();
+      const ident = String(body?.identifier || "").trim();
+      const pass  = String(body?.password   || "").trim();
+      if (!ident || !pass) {
+        return new Response(JSON.stringify({ error: "Username/email and password are required" }), { status: 400, headers: { ...hBase, 'Content-Type': 'application/json' } });
       }
-    });
-
-  } catch (err) {
-    console.error("[login] Unhandled error:", err?.stack || err);
-    return json({ error: "Internal error" }, 500, cors);
-  }
-};
+      // Buscar usuario (ajusta si tu query es diferente)
+      const byEmail = ident.includes("@");
+      const { results } = await env.DB.prepare(userSelect(byEmail)).bind(ident).all();
+      const user = results?.[0];
+      if (!user || !user.salt || !user.password_hash || user.active !== 1) {
+        return new Response(JSON.stringify({ error: "Invalid credentials" }), { status: 401, headers: { ...hBase, 'Content-Type': 'application/json' } });
+      }
+      // Verificar password (usa tu hashPassword real)
+      const hashed = await hashPassword(pass, user.salt);
+      if (hashed !== user.password_hash) {
+        return new Response(JSON.stringify({ error: "Invalid credentials" }), { status: 401, headers: { ...hBase, 'Content-Type': 'application/json' } });
+      }
+      // Crear sessionId y guardar en KV
+      const sessionId = crypto.randomUUID();
+      const ttl = parseInt(env.SESSION_TTL_SECONDS || '2592000', 10); // 30 días por defecto
+      await env.KV.put(`sid:${sessionId}`, JSON.stringify({ userId: user.id, username: user.username, role: user.role, branch_id: user.branch_id, full_name: user.full_name, email: user.email }), { expirationTtl: ttl });
+      // Responder con cookie y CORS
+      const headers = {
+        ...hBase,
+        ...setCookieHeaders(sessionId),
+        'Content-Type': 'application/json'
+      };
+      const userOut = { id: user.id, username: user.username, role: user.role, branch_id: user.branch_id, full_name: user.full_name, email: user.email };
+      return new Response(JSON.stringify({ user: userOut }), { status: 200, headers });
+    } catch (e) {
+      return new Response(JSON.stringify({ error: 'Invalid credentials' }), { status: 401, headers: { ...hBase, 'Content-Type': 'application/json' } });
+    }
+  };
