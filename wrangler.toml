@@ -1,29 +1,56 @@
+# ===== wrangler.toml (raíz) =====
 name = "sistema-pos-mg"
-compatibility_date = "2025-08-14"
+compatibility_date = "2025-08-18"
 
-# (opcional, ayuda a silenciar warnings en build logs de Pages)
+# Cloudflare Pages: dónde queda el build estático
 pages_build_output_dir = "frontend/dist"
 
-# Bindings por defecto (usados por wrangler y referencia en Pages)
+# --- Bindings globales (dev/preview/prod, salvo que los sobreescribas por env) ---
+# D1 (Base de datos)
 [[d1_databases]]
 binding = "DB"
 database_name = "sistema-pos-mg-db"
 database_id = "db8889bc-2a54-4db4-8e53-a1ec4e7280ed"
 
+# KV principal
 [[kv_namespaces]]
 binding = "KV"
 id = "b6794f5e1acf4bb3b8a007ca881e65d9"
 
+# Alias opcional si tu código usa env.SESSION_STORE
+[[kv_namespaces]]
+binding = "SESSION_STORE"
+id = "b6794f5e1acf4bb3b8a007ca881e65d9"
+
+# Variables globales
 [vars]
 SESSION_TTL_SECONDS = "86400"
 ENABLE_DEV_CREATE_USER = "false"
+ENVIRONMENT = "production"       # opcional, si tu código lo usa
+SESSION_DURATION = "86400"       # opcional, alias del TTL si lo usabas antes
 
+# --- Producción ---
 [env.production]
 name = "sistema-pos-mg-prod"
-[[env.production.d1_databases]]
-binding = "DB"
-database_name = "sistema-pos-mg-db"
-database_id = "db8889bc-2a54-4db4-8e53-a1ec4e7280ed"
-[[env.production.kv_namespaces]]
-binding = "KV"
-id = "b6794f5e1acf4bb3b8a007ca881e65d9"
+
+  # D1 en prod
+  [[env.production.d1_databases]]
+  binding = "DB"
+  database_name = "sistema-pos-mg-db"
+  database_id = "db8889bc-2a54-4db4-8e53-a1ec4e7280ed"
+
+  # KV en prod (mismo namespace + alias)
+  [[env.production.kv_namespaces]]
+  binding = "KV"
+  id = "b6794f5e1acf4bb3b8a007ca881e65d9"
+
+  [[env.production.kv_namespaces]]
+  binding = "SESSION_STORE"
+  id = "b6794f5e1acf4bb3b8a007ca881e65d9"
+
+  # Duplico vars para evitar el WARNING de Wrangler (no hereda desde top-level)
+  [env.production.vars]
+  SESSION_TTL_SECONDS = "86400"
+  ENABLE_DEV_CREATE_USER = "false"
+  ENVIRONMENT = "production"
+  SESSION_DURATION = "86400"
