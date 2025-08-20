@@ -1,4 +1,4 @@
-// /api/system/health.js
+// functions/api/system/health.js
 import { json, getCorsHeaders, validateSession, getCookie } from '../utils.js';
 
 export async function onRequestGet({ request, env }) {
@@ -65,6 +65,14 @@ export async function onRequestGet({ request, env }) {
             timestamp: new Date().toISOString()
         }, 500, corsHeaders);
     }
+}
+
+// Preflight para CORS
+export async function onRequestOptions({ request }) {
+    const headers = getCorsHeaders(request);
+    headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS';
+    headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, Accept';
+    return new Response(null, { status: 204, headers });
 }
 
 async function checkDatabase(env) {
