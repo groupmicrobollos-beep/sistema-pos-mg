@@ -1,35 +1,39 @@
+// scripts/update_passwords.js
 import { generateSalt, hashPassword } from '../functions/api/utils.js';
 
-// Contraseñas conocidas para actualizar
-const KNOWN_PASSWORDS = {
-    'test_user@pos.local': 'password123',
-    'test@example.com': 'test123',
-    'admin@local': 'admin123'
-};
-
+/**
+ * Recalcula los hashes de contraseñas para todos los usuarios
+ * y los guarda en la base de datos.
+ */
 export async function updateUserPasswords(env) {
-    const { results } = await env.DB.prepare(
-        "SELECT id, email FROM users WHERE needs_password_update = 1"
-    ).all();
+    console.log("[updateUserPasswords] Iniciando actualización de contraseñas...");
+
+    // Obtener todos los usuarios
+    const { results } = await env.DB.prepare("SELECT id, username, password FROM users").all();
+
+    if (!results || results.length === 0) {
+        console.log("[updateUserPasswords] No se encontraron usuarios.");
+        return;
+    }
 
     for (const user of results) {
-        const password = KNOWN_PASSWORDS[user.email];
-        if (!password) {
-            console.log(`No se encontró contraseña conocida para ${user.email}`);
-            continue;
+        try {
+            // Generar un nuevo salt
+            const salt = await generateSalt();
+
+            // Recalcular hash con PBKDF2
+            const passwordHash = await hashPassword(user.password, salt);
+
+            // Guardar en la DB
+            await env.DB.prepare(
+                "UPDATE users SET password_hash = ?, salt = ? WHERE id = ?"
+            ).bind(passwordHash, salt, user.id).run();
+
+            console.log(`[updateUserPasswords] Usuario ${user.username} actualizado.`);
+        } catch (err) {
+            console.error(`[updateUserPasswords] Error con usuario ${user.username}:`, err);
         }
-
-        const salt = await generateSalt();
-        const hash = await hashPassword(password, salt);
-
-        await env.DB.prepare(`
-            UPDATE users 
-            SET salt = ?, 
-                password_hash = ?,
-                needs_password_update = 0
-            WHERE id = ?
-        `).bind(salt, hash, user.id).run();
-
-        console.log(`Actualizada contraseña para ${user.email}`);
     }
+
+    console.log("[updateUserPasswords] Finalizado.");
 }
