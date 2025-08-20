@@ -1,5 +1,5 @@
 // /api/system/health.js
-import { json, getCorsHeaders, validateSession, getCookie } from '../../utils.js';
+import { json, getCorsHeaders, validateSession, getCookie } from '././utils.js';
 
 export async function onRequestGet({ request, env }) {
     const corsHeaders = getCorsHeaders(request);
@@ -90,4 +90,5 @@ async function checkDatabase(env) {
 
     return status;
 }
+
 
