@@ -1,109 +1,37 @@
-// /api/auth/me.js
 
-function cors(req) {
-    const origin = req.headers.get("Origin");
-    if (!origin) return {
-        "Access-Control-Allow-Origin": "*",
-    };
+// Cloudflare Pages: helpers mínimos para CORS y cookies
+const ORIGIN = 'https://sistema-pos-mg.pages.dev'; // Cambia por tu frontend real si es otro
+function corsHeaders() {
     return {
-        "Access-Control-Allow-Origin": origin,
-        "Access-Control-Allow-Credentials": "true",
-        "Access-Control-Allow-Methods": "GET,OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type",
-        "Vary": "Origin",
+        'Access-Control-Allow-Origin': ORIGIN,
+        'Access-Control-Allow-Credentials': 'true',
+        'Vary': 'Origin',
+        'Cache-Control': 'no-store'
     };
 }
-
-function json(d, s = 200, req) {
-    const headers = {
-        "Content-Type": "application/json",
-        ...(req ? cors(req) : {})
-    };
-    return new Response(JSON.stringify(d), { status: s, headers });
+function parseCookies(request) {
+    const raw = request.headers.get('Cookie') || '';
+    return raw.split(';').reduce((acc, part) => {
+        const [k, v] = part.trim().split('=');
+        if (k) acc[k] = v || '';
+        return acc;
+    }, {});
 }
 
-function permsFor(role) {
-    if (role === "admin")
-        return { all: true, inventory: true, quotes: true, settings: true, reports: true, pos: true };
-    if (role === "seller")
-        return { pos: true, quotes: true, inventory: true };
-    return {};
-}
-
-import { getCookie as getCookieSafe } from '../utils.js';
-
-
-export const onRequest = async ({ request, env }) => {
-    try {
-        // Log headers para debug
-        console.log("[me] Headers:", 
-            "Cookie:", request.headers.get("Cookie"),
-            "Origin:", request.headers.get("Origin")
-        );
-
-    const sid = getCookieSafe(request, "sid");
-    const url = new URL(request.url);
-    const frontendOrigin = request.headers.get("Origin") || url.origin;
+// Cloudflare Pages: GET /api/auth/me
+export async function onRequestGet({ request, env }) {
+    const hBase = corsHeaders();
+    const cookies = parseCookies(request);
+    const sid = cookies.sid;
     if (!sid) {
-        console.warn("[me] No cookie sid encontrada");
-        return new Response(JSON.stringify({ error: "No session cookie" }), {
-            status: 401,
-            headers: {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': frontendOrigin,
-                'Access-Control-Allow-Credentials': 'true',
-                ...cors(request)
-            }
-        });
+        return new Response(JSON.stringify({ error: 'No session cookie' }), { status: 401, headers: { ...hBase, 'Content-Type': 'application/json' } });
     }
-
-        const sql = `
-        SELECT u.id, u.email, u.username, u.role, u.branch_id, u.full_name
-        FROM sessions s
-        JOIN users u ON u.id = s.user_id
-        WHERE s.id = ?
-          AND CAST(strftime('%s', s.expires_at) AS INTEGER) > CAST(strftime('%s','now') AS INTEGER)
-          AND COALESCE(u.active,1) = 1
-        LIMIT 1
-        `;
-        
-        let row;
-        try {
-            const { results } = await env.DB.prepare(sql).bind(sid).all();
-            row = results?.[0];
-            
-            if (!row) {
-                console.warn("[me] Sesión no encontrada o expirada para sid:", sid);
-                return new Response(JSON.stringify({ error: "No session" }), {
-                    status: 401,
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Access-Control-Allow-Origin': frontendOrigin,
-                        'Access-Control-Allow-Credentials': 'true',
-                        ...cors(request)
-                    }
-                });
-            }
-
-            const userOut = {
-                ...row,
-                perms: permsFor(row.role),
-            };
-            return new Response(JSON.stringify(userOut), {
-                status: 200,
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': frontendOrigin,
-                    'Access-Control-Allow-Credentials': 'true',
-                    ...cors(request)
-                }
-            });
-        } catch (err) {
-            console.error("[me] Error DB:", err?.message || err);
-            return json({ error: "Error interno" }, 500, request);
-        }
-    } catch (err) {
-        console.error("[me] Error general:", err?.message || err);
-        return json({ error: "Error interno" }, 500, request);
+    const raw = await env.KV.get(`sid:${sid}`);
+    if (!raw) {
+        return new Response(JSON.stringify({ error: 'Invalid session' }), { status: 401, headers: { ...hBase, 'Content-Type': 'application/json' } });
     }
-};
+    const session = JSON.parse(raw);
+    // Opcional: refrescar TTL aquí si quieres
+    const user = { id: session.userId, username: session.username, role: session.role, branch_id: session.branch_id, full_name: session.full_name, email: session.email };
+    return new Response(JSON.stringify({ user }), { status: 200, headers: { ...hBase, 'Content-Type': 'application/json' } });
+}
