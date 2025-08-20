@@ -1,0 +1,38 @@
+{
+  "functions": {
+    "api/auth/login": {
+      "memory": 128,
+      "maxDuration": 10
+    },
+    "api/auth/me": {
+      "memory": 128,
+      "maxDuration": 10
+    },
+    "api/auth/logout": {
+      "memory": 128,
+      "maxDuration": 10
+    }
+  },
+  "routes": [
+    {
+      "pattern": "/api/auth/login",
+      "function": "api/auth/login"
+    },
+    {
+      "pattern": "/api/auth/me",
+      "function": "api/auth/me"
+    },
+    {
+      "pattern": "/api/auth/logout",
+      "function": "api/auth/logout"
+    },
+    {
+      "pattern": "/api/*",
+      "function": "api/[function]"
+    },
+    {
+      "pattern": "/*",
+      "serve": "index.html"
+    }
+  ]
+}
