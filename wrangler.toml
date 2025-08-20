@@ -1,0 +1,33 @@
+name = "sistema-pos-mg"
+compatibility_date = "2025-08-14"
+
+# (opcional, ayuda a silenciar warnings en build logs de Pages)
+pages_build_output_dir = "frontend/dist"
+
+# Bindings por defecto (usados por wrangler y referencia en Pages)
+[[d1_databases]]
+binding = "DB"
+database_name = "sistema-pos-mg-db"
+database_id = "db8889bc-2a54-4db4-8e53-a1ec4e7280ed"
+
+[[kv_namespaces]]
+binding = "KV"
+id = "b6794f5e1acf4bb3b8a007ca881e65d9"
+
+[vars]
+SESSION_TTL_SECONDS = "86400"
+ENABLE_DEV_CREATE_USER = "false"
+
+# Variables fusionadas desde frontend/wrangler.toml
+ENVIRONMENT = "production"
+SESSION_DURATION = "86400"
+
+[env.production]
+name = "sistema-pos-mg-prod"
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "sistema-pos-mg-db"
+database_id = "db8889bc-2a54-4db4-8e53-a1ec4e7280ed"
+[[env.production.kv_namespaces]]
+binding = "KV"
+id = "b6794f5e1acf4bb3b8a007ca881e65d9"
