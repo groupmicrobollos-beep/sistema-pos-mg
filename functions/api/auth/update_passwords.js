@@ -1,4 +1,4 @@
-import { getCorsHeaders, json } from '../utils.js';
+import { getCorsHeaders, json } from '../../utils.js';
 import { updateUserPasswords } from '../../../scripts/update_passwords.js';
 
 export const onRequestPost = async ({ request, env }) => {
@@ -27,3 +27,4 @@ export const onRequestPost = async ({ request, env }) => {
         return json({ error: "Internal server error" }, 500, corsHeaders);
     }
 };
+
