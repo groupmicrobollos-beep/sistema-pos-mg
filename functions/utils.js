@@ -1,12 +1,11 @@
 // functions/api/utils.js
-// Utilidades compartidas para todos los endpoints (Cloudflare Workers)
 
+// --- Constantes hashing ---
 const PBKDF2_ITERATIONS = 100000;
 const SALT_LENGTH = 16;
 const KEY_LENGTH = 32;
 
-// --- Hash / Password ---
-
+// --- Salt y hash (Web Crypto) ---
 export async function generateSalt() {
   const salt = crypto.getRandomValues(new Uint8Array(SALT_LENGTH));
   return [...salt].map(b => b.toString(16).padStart(2, '0')).join('');
@@ -30,13 +29,11 @@ export async function verifyPassword(password, user) {
 
 function timingSafeEqual(a, b) {
   if (a.length !== b.length) return false;
-  let r = 0;
-  for (let i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  let r = 0; for (let i=0;i<a.length;i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return r === 0;
 }
 
-// --- Sesiones en D1 (si usás D1) ---
-
+// --- Sesión en D1 (si la usás) ---
 export async function createSession(db, userId, ttlSec = 86400) {
   const sessionId = crypto.randomUUID();
   const expiresAt = new Date(Date.now() + ttlSec * 1000).toISOString();
@@ -44,7 +41,6 @@ export async function createSession(db, userId, ttlSec = 86400) {
     .bind(sessionId, userId, expiresAt).run();
   return sessionId;
 }
-
 export async function getSession(db, sessionId) {
   const { results } = await db.prepare(`
     SELECT s.*, u.* 
@@ -55,33 +51,29 @@ export async function getSession(db, sessionId) {
   `).bind(sessionId).all();
   return results?.[0] || null;
 }
-
 export async function deleteSession(db, sessionId) {
   await db.prepare("DELETE FROM sessions WHERE id = ?").bind(sessionId).run();
 }
 
 // --- Usuario público / permisos ---
-
-export function publicUser(u) {
+export function publicUser(user) {
   return {
-    id: u.id,
-    username: u.username,
-    role: u.role,
-    perms: getPermissions(u.role),
-    full_name: u.full_name,
-    email: u.email,
-    branch_id: u.branch_id
+    id: user.id,
+    username: user.username,
+    role: user.role,
+    perms: getPermissions(user.role),
+    full_name: user.full_name,
+    email: user.email,
+    branch_id: user.branch_id
   };
 }
-
 export function getPermissions(role) {
   if (role === "admin") return { all:true, inventory:true, quotes:true, settings:true, reports:true, pos:true };
   if (role === "seller") return { pos:true, quotes:true, inventory:true };
   return {};
 }
 
-// --- Cookies y CORS ---
-
+// --- Cookies & CORS ---
 export function getCookieConfig(request) {
   const origin = request.headers.get("Origin");
   const url = new URL(request.url);
@@ -93,26 +85,18 @@ export function getCookieConfig(request) {
     domain: isLocalHttp ? undefined : url.hostname,
   };
 }
-
-export function generateCookieHeader(sessionId, cfg, maxAge = 86400) {
-  const parts = [
-    `sid=${sessionId}`,
-    'HttpOnly',
-    'Path=/',
-    `SameSite=${cfg.sameSite}`,
-  ];
-  if (cfg.isSecure || cfg.sameSite === 'None') parts.push('Secure');
-  if (cfg.domain && !cfg.domain.includes('localhost')) parts.push(`Domain=${cfg.domain}`);
+export function generateCookieHeader(sessionId, config, maxAge = 86400) {
+  const parts = [`sid=${sessionId}`, 'HttpOnly', 'Path=/', `SameSite=${config.sameSite}`];
+  if (config.isSecure || config.sameSite === 'None') parts.push('Secure');
+  if (config.domain && !config.domain.includes('localhost')) parts.push(`Domain=${config.domain}`);
   if (maxAge > 0) parts.push(`Max-Age=${maxAge}`);
   return parts.join('; ');
 }
-
+// ⚠️ Con credenciales NO usar "*": reflejamos el Origin
 export function getCorsHeaders(request) {
-  const origin = request.headers.get("Origin");
-  // Con credenciales NUNCA usar '*'
-  const allowOrigin = origin || '';
+  const origin = request.headers.get("Origin") || '';
   return {
-    "Access-Control-Allow-Origin": allowOrigin,
+    "Access-Control-Allow-Origin": origin,
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept",
     "Access-Control-Allow-Credentials": "true",
@@ -120,14 +104,9 @@ export function getCorsHeaders(request) {
     "Cache-Control": "no-store",
   };
 }
-
 export function json(data, status = 200, headers = {}) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { "Content-Type": "application/json", ...headers }
-  });
+  return new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json", ...headers } });
 }
-
 export function getCookie(request, name) {
   try {
     const cookieHeader = request.headers.get("Cookie");
@@ -140,16 +119,16 @@ export function getCookie(request, name) {
   }
 }
 
-// --- Sesiones en KV (si usás KV) ---
-
+// --- Sesión en KV (aliasa SESSION_STORE o KV) ---
 export async function validateSession(env, sid) {
   if (!sid) return null;
   try {
-    const sessionData = await (env.SESSION_STORE || env.KV)?.get(sid);
+    const KV = env.SESSION_STORE || env.KV;
+    const sessionData = await KV.get(sid);
     if (!sessionData) return null;
     const session = JSON.parse(sessionData);
     if (session.expiresAt && new Date(session.expiresAt) < new Date()) {
-      await (env.SESSION_STORE || env.KV).delete(sid);
+      await KV.delete(sid);
       return null;
     }
     return session.user;
@@ -159,8 +138,7 @@ export async function validateSession(env, sid) {
   }
 }
 
-// --- Middleware & DB errors ---
-
+// --- Middleware / errores ---
 export async function requireAuth(request, env) {
   const sid = getCookie(request, "sid");
   if (!sid) return json({ error: "No session cookie" }, 401, getCorsHeaders(request));
@@ -168,18 +146,11 @@ export async function requireAuth(request, env) {
   if (!user) return json({ error: "Invalid or expired session" }, 401, getCorsHeaders(request));
   return { user, perms: getPermissions(user.role) };
 }
-
-export function handleDbError(err, op = "database operation") {
-  console.error(`[DB Error] ${op}:`, err);
+export function handleDbError(err, operation = "database operation") {
+  console.error(`[DB Error] ${operation}:`, err);
   return json({ error: "Internal server error" }, 500);
 }
-
 export async function ensureSchema(env, table, schema) {
-  try {
-    await env.DB.prepare(schema).run();
-    return true;
-  } catch (err) {
-    console.warn(`[Schema] Error ensuring ${table}:`, err);
-    return false;
-  }
+  try { await env.DB.prepare(schema).run(); return true; }
+  catch (err) { console.warn(`[Schema] Error ensuring ${table}:`, err); return false; }
 }
