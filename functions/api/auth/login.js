@@ -87,12 +87,26 @@ export const onRequest = async ({ request, env }) => {
       return json({ error: "Internal server error while creating session" }, 500, cors);
     }
 
-    // 5) Cookie
-    const cookieCfg = getCookieConfig(request);
-    const cookie = generateCookieHeader(sid, cookieCfg, ttlSec);
 
-    // 6) OK
-    return json(publicUser(user), 200, { ...cors, "Set-Cookie": cookie });
+    // 5) Cookie y headers CORS manuales (Node.js puro compatible)
+    // Detectar si HTTPS real (usar Secure solo si corresponde)
+    const url = new URL(request.url);
+    const useHttps = url.protocol === 'https:';
+    // Origin exacto del frontend
+    const frontendOrigin = request.headers.get("Origin") || url.origin;
+    const setCookie = `sid=${sid}; HttpOnly; Path=/; SameSite=Lax${useHttps ? '; Secure' : ''}`;
+
+    // Respuesta manual con headers correctos
+    return new Response(JSON.stringify({ user: publicUser(user) }), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'Set-Cookie': setCookie,
+        'Access-Control-Allow-Origin': frontendOrigin,
+        'Access-Control-Allow-Credentials': 'true',
+        ...cors
+      }
+    });
 
   } catch (err) {
     console.error("[login] Unhandled error:", err?.stack || err);
