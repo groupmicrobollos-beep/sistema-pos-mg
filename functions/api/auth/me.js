@@ -42,10 +42,20 @@ export const onRequest = async ({ request, env }) => {
         );
 
     const sid = getCookieSafe(request, "sid");
-        if (!sid) {
-            console.warn("[me] No cookie sid encontrada");
-            return json({ error: "No session cookie" }, 401, request);
-        }
+    const url = new URL(request.url);
+    const frontendOrigin = request.headers.get("Origin") || url.origin;
+    if (!sid) {
+        console.warn("[me] No cookie sid encontrada");
+        return new Response(JSON.stringify({ error: "No session cookie" }), {
+            status: 401,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': frontendOrigin,
+                'Access-Control-Allow-Credentials': 'true',
+                ...cors(request)
+            }
+        });
+    }
 
         const sql = `
         SELECT u.id, u.email, u.username, u.role, u.branch_id, u.full_name
@@ -64,14 +74,30 @@ export const onRequest = async ({ request, env }) => {
             
             if (!row) {
                 console.warn("[me] Sesión no encontrada o expirada para sid:", sid);
-                return json({ error: "No session" }, 401, request);
+                return new Response(JSON.stringify({ error: "No session" }), {
+                    status: 401,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Access-Control-Allow-Origin': frontendOrigin,
+                        'Access-Control-Allow-Credentials': 'true',
+                        ...cors(request)
+                    }
+                });
             }
 
             const userOut = {
                 ...row,
                 perms: permsFor(row.role),
             };
-            return json(userOut, 200, request);
+            return new Response(JSON.stringify(userOut), {
+                status: 200,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': frontendOrigin,
+                    'Access-Control-Allow-Credentials': 'true',
+                    ...cors(request)
+                }
+            });
         } catch (err) {
             console.error("[me] Error DB:", err?.message || err);
             return json({ error: "Error interno" }, 500, request);
