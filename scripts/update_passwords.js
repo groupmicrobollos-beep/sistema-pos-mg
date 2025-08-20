@@ -1,4 +1,4 @@
-import { generateSalt, hashPassword } from '../functions/api/utils.js';
+import { generateSalt, hashPassword } from '../functions/utils.js';
 
 // Contraseñas conocidas para actualizar
 const KNOWN_PASSWORDS = {
